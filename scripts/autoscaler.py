@@ -1,0 +1,399 @@
+#!/usr/bin/env python3
+"""
+k3s autoscaler for Fly.io
+
+Monitors cluster resource allocation and dynamically creates/destroys
+agent machines via the Fly Machines API.
+"""
+
+import json
+import logging
+import os
+import subprocess
+import time
+from datetime import datetime, timezone
+
+import requests
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[autoscaler] %(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+log = logging.getLogger("autoscaler")
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+HIGH_WATERMARK = int(os.environ.get("AUTOSCALER_HIGH_WATERMARK", "80"))
+LOW_WATERMARK = int(os.environ.get("AUTOSCALER_LOW_WATERMARK", "30"))
+MAX_AGENTS = int(os.environ.get("AUTOSCALER_MAX_AGENTS", "4"))
+COOLDOWN_SECONDS = int(os.environ.get("AUTOSCALER_COOLDOWN_SECONDS", "120"))
+CHECK_INTERVAL = int(os.environ.get("AUTOSCALER_CHECK_INTERVAL", "30"))
+AGENT_VM_SIZE = os.environ.get("AUTOSCALER_AGENT_VM_SIZE", "shared-cpu-2x")
+AGENT_MEMORY_MB = int(os.environ.get("AUTOSCALER_AGENT_MEMORY_MB", "2048"))
+
+FLY_API_TOKEN = os.environ["FLY_API_TOKEN"]
+FLY_APP_NAME = os.environ["FLY_APP_NAME"]
+FLY_PRIVATE_IP = os.environ["FLY_PRIVATE_IP"]
+FLY_REGION = os.environ.get("FLY_REGION", "ord")
+FLY_IMAGE_REF = os.environ.get("FLY_IMAGE_REF", "")
+K3S_TOKEN = os.environ["K3S_TOKEN"]
+
+FLY_API_BASE = "http://_api.internal:4280/v1"
+HEADERS = {"Authorization": f"Bearer {FLY_API_TOKEN}", "Content-Type": "application/json"}
+
+AGENT_METADATA = {"role": "agent", "managed-by": "autoscaler"}
+
+# Map VM size names to guest config
+VM_SIZE_MAP = {
+    "shared-cpu-1x": {"cpu_kind": "shared", "cpus": 1},
+    "shared-cpu-2x": {"cpu_kind": "shared", "cpus": 2},
+    "shared-cpu-4x": {"cpu_kind": "shared", "cpus": 4},
+    "shared-cpu-8x": {"cpu_kind": "shared", "cpus": 8},
+    "performance-1x": {"cpu_kind": "performance", "cpus": 1},
+    "performance-2x": {"cpu_kind": "performance", "cpus": 2},
+    "performance-4x": {"cpu_kind": "performance", "cpus": 4},
+    "performance-8x": {"cpu_kind": "performance", "cpus": 8},
+}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def kubectl(*args: str) -> str:
+    """Run a kubectl command via k3s and return stdout."""
+    result = subprocess.run(
+        ["k3s", "kubectl", *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"kubectl {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def get_cluster_allocation() -> dict:
+    """
+    Calculate cluster-wide resource allocation percentage.
+    Returns {"cpu_pct": float, "mem_pct": float}.
+    """
+    nodes_json = json.loads(kubectl("get", "nodes", "-o", "json"))
+    pods_json = json.loads(kubectl("get", "pods", "--all-namespaces", "-o", "json"))
+
+    total_cpu_allocatable = 0  # in millicores
+    total_mem_allocatable = 0  # in bytes
+
+    for node in nodes_json.get("items", []):
+        # Only count Ready nodes
+        conditions = node.get("status", {}).get("conditions", [])
+        ready = any(c["type"] == "Ready" and c["status"] == "True" for c in conditions)
+        if not ready:
+            continue
+        alloc = node["status"]["allocatable"]
+        total_cpu_allocatable += parse_cpu(alloc["cpu"])
+        total_mem_allocatable += parse_memory(alloc["memory"])
+
+    total_cpu_requests = 0
+    total_mem_requests = 0
+
+    for pod in pods_json.get("items", []):
+        phase = pod.get("status", {}).get("phase", "")
+        if phase not in ("Running", "Pending"):
+            continue
+        for container in pod.get("spec", {}).get("containers", []):
+            requests = container.get("resources", {}).get("requests", {})
+            total_cpu_requests += parse_cpu(requests.get("cpu", "0"))
+            total_mem_requests += parse_memory(requests.get("memory", "0"))
+
+    cpu_pct = (total_cpu_requests / total_cpu_allocatable * 100) if total_cpu_allocatable else 0
+    mem_pct = (total_mem_requests / total_mem_allocatable * 100) if total_mem_allocatable else 0
+
+    return {"cpu_pct": round(cpu_pct, 1), "mem_pct": round(mem_pct, 1)}
+
+
+def parse_cpu(value: str) -> int:
+    """Parse CPU value to millicores."""
+    value = str(value)
+    if value.endswith("m"):
+        return int(value[:-1])
+    return int(float(value) * 1000)
+
+
+def parse_memory(value: str) -> int:
+    """Parse memory value to bytes."""
+    value = str(value)
+    if value == "0":
+        return 0
+    units = {"Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4}
+    for suffix, multiplier in units.items():
+        if value.endswith(suffix):
+            return int(value[: -len(suffix)]) * multiplier
+    # Plain bytes or plain number
+    return int(value)
+
+
+# ---------------------------------------------------------------------------
+# Fly Machines API
+# ---------------------------------------------------------------------------
+
+
+def list_agent_machines() -> list:
+    """List all running agent machines managed by the autoscaler."""
+    resp = requests.get(f"{FLY_API_BASE}/apps/{FLY_APP_NAME}/machines", headers=HEADERS, timeout=10)
+    resp.raise_for_status()
+    machines = resp.json()
+    agents = []
+    for m in machines:
+        meta = m.get("config", {}).get("metadata", {})
+        if meta.get("role") == "agent" and meta.get("managed-by") == "autoscaler":
+            if m.get("state") in ("started", "starting", "created"):
+                agents.append(m)
+    return agents
+
+
+def create_agent_machine() -> str:
+    """Create a new agent machine. Returns the machine ID."""
+    guest = VM_SIZE_MAP.get(AGENT_VM_SIZE, {"cpu_kind": "shared", "cpus": 2})
+    guest["memory_mb"] = AGENT_MEMORY_MB
+
+    payload = {
+        "region": FLY_REGION,
+        "config": {
+            "image": FLY_IMAGE_REF,
+            "env": {
+                "K3S_ROLE": "agent",
+                "K3S_TOKEN": K3S_TOKEN,
+                "K3S_SERVER_IP": FLY_PRIVATE_IP,
+            },
+            "guest": guest,
+            "metadata": AGENT_METADATA,
+            "auto_destroy": True,
+            "restart": {"policy": "on-failure", "max_retries": 3},
+        },
+    }
+
+    resp = requests.post(
+        f"{FLY_API_BASE}/apps/{FLY_APP_NAME}/machines",
+        headers=HEADERS,
+        json=payload,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    machine = resp.json()
+    machine_id = machine["id"]
+    log.info("Created agent machine %s in %s", machine_id, FLY_REGION)
+
+    # Wait for the machine to start
+    wait_for_machine_state(machine_id, "started", timeout=60)
+    return machine_id
+
+
+def stop_machine(machine_id: str):
+    """Stop a Fly machine."""
+    resp = requests.post(
+        f"{FLY_API_BASE}/apps/{FLY_APP_NAME}/machines/{machine_id}/stop",
+        headers=HEADERS,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    log.info("Stopped machine %s", machine_id)
+
+
+def destroy_machine(machine_id: str):
+    """Destroy a Fly machine."""
+    resp = requests.delete(
+        f"{FLY_API_BASE}/apps/{FLY_APP_NAME}/machines/{machine_id}?force=true",
+        headers=HEADERS,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    log.info("Destroyed machine %s", machine_id)
+
+
+def wait_for_machine_state(machine_id: str, desired: str, timeout: int = 60):
+    """Poll until a machine reaches the desired state."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = requests.get(
+            f"{FLY_API_BASE}/apps/{FLY_APP_NAME}/machines/{machine_id}",
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        state = resp.json().get("state")
+        if state == desired:
+            return
+        time.sleep(2)
+    log.warning("Machine %s did not reach state '%s' within %ds", machine_id, desired, timeout)
+
+
+# ---------------------------------------------------------------------------
+# Scaling actions
+# ---------------------------------------------------------------------------
+
+
+def scale_up():
+    """Add one agent node to the cluster."""
+    machine_id = create_agent_machine()
+
+    # Wait for the node to register in k8s
+    node_name = machine_id
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        try:
+            nodes = kubectl("get", "nodes", "-o", "name")
+            if f"node/{node_name}" in nodes:
+                log.info("Agent node %s joined the cluster", node_name)
+                return machine_id
+        except RuntimeError:
+            pass
+        time.sleep(5)
+
+    log.warning("Agent node %s did not appear in k8s within 90s (machine created)", node_name)
+    return machine_id
+
+
+def scale_down(agents: list):
+    """Remove the newest agent node from the cluster."""
+    # Sort by created_at descending, remove the newest
+    agents_sorted = sorted(agents, key=lambda m: m.get("created_at", ""), reverse=True)
+    target = agents_sorted[0]
+    machine_id = target["id"]
+    node_name = machine_id
+
+    log.info("Scaling down: removing agent %s", machine_id)
+
+    # Cordon and drain the node
+    try:
+        kubectl("cordon", node_name)
+        log.info("Cordoned node %s", node_name)
+    except RuntimeError as e:
+        log.warning("Failed to cordon node %s: %s", node_name, e)
+
+    try:
+        kubectl(
+            "drain", node_name,
+            "--ignore-daemonsets",
+            "--delete-emptydir-data",
+            "--timeout=60s",
+            "--force",
+        )
+        log.info("Drained node %s", node_name)
+    except RuntimeError as e:
+        log.warning("Failed to drain node %s: %s", node_name, e)
+
+    # Remove from k8s
+    try:
+        kubectl("delete", "node", node_name)
+        log.info("Deleted k8s node %s", node_name)
+    except RuntimeError as e:
+        log.warning("Failed to delete k8s node %s: %s", node_name, e)
+
+    # Stop and destroy the Fly machine
+    try:
+        stop_machine(machine_id)
+    except Exception as e:
+        log.warning("Failed to stop machine %s: %s", machine_id, e)
+
+    try:
+        destroy_machine(machine_id)
+    except Exception as e:
+        log.warning("Failed to destroy machine %s: %s", machine_id, e)
+
+
+def cleanup_orphaned_machines(agents: list):
+    """Remove agent machines that exist in Fly but aren't registered as k8s nodes."""
+    try:
+        nodes_output = kubectl("get", "nodes", "-o", "name")
+        node_names = {line.replace("node/", "") for line in nodes_output.strip().split("\n") if line}
+    except RuntimeError:
+        return
+
+    for agent in agents:
+        machine_id = agent["id"]
+        created_at = agent.get("created_at", "")
+        # Give new machines 3 minutes to register
+        if created_at:
+            try:
+                created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                age = (datetime.now(timezone.utc) - created).total_seconds()
+                if age < 180:
+                    continue
+            except (ValueError, TypeError):
+                pass
+
+        if machine_id not in node_names:
+            log.warning("Orphaned agent machine %s (not in k8s), cleaning up", machine_id)
+            try:
+                stop_machine(machine_id)
+            except Exception:
+                pass
+            try:
+                destroy_machine(machine_id)
+            except Exception as e:
+                log.error("Failed to destroy orphaned machine %s: %s", machine_id, e)
+
+
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
+
+
+def main():
+    log.info("Autoscaler starting")
+    log.info(
+        "Config: high=%d%% low=%d%% max_agents=%d cooldown=%ds interval=%ds vm=%s mem=%dMB",
+        HIGH_WATERMARK, LOW_WATERMARK, MAX_AGENTS, COOLDOWN_SECONDS, CHECK_INTERVAL,
+        AGENT_VM_SIZE, AGENT_MEMORY_MB,
+    )
+
+    # Wait for cluster to stabilize
+    log.info("Waiting 60s for cluster to stabilize...")
+    time.sleep(60)
+
+    last_scale_time = 0.0
+
+    while True:
+        try:
+            # Check resource allocation
+            alloc = get_cluster_allocation()
+            agents = list_agent_machines()
+            num_agents = len(agents)
+            peak_pct = max(alloc["cpu_pct"], alloc["mem_pct"])
+
+            log.info(
+                "Cluster: cpu=%.1f%% mem=%.1f%% peak=%.1f%% agents=%d/%d",
+                alloc["cpu_pct"], alloc["mem_pct"], peak_pct, num_agents, MAX_AGENTS,
+            )
+
+            now = time.time()
+            in_cooldown = (now - last_scale_time) < COOLDOWN_SECONDS
+
+            if in_cooldown:
+                remaining = int(COOLDOWN_SECONDS - (now - last_scale_time))
+                log.info("In cooldown (%ds remaining)", remaining)
+            elif peak_pct > HIGH_WATERMARK and num_agents < MAX_AGENTS:
+                log.info("SCALE UP: allocation %.1f%% > %d%% threshold", peak_pct, HIGH_WATERMARK)
+                scale_up()
+                last_scale_time = time.time()
+            elif peak_pct < LOW_WATERMARK and num_agents > 0:
+                log.info("SCALE DOWN: allocation %.1f%% < %d%% threshold", peak_pct, LOW_WATERMARK)
+                scale_down(agents)
+                last_scale_time = time.time()
+
+            # Periodic orphan cleanup
+            if agents:
+                cleanup_orphaned_machines(agents)
+
+        except Exception:
+            log.exception("Error in autoscaler loop")
+
+        time.sleep(CHECK_INTERVAL)
+
+
+if __name__ == "__main__":
+    main()

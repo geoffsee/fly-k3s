@@ -1,0 +1,24 @@
+app = "k3s-cluster"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  K3S_ROLE = "server"
+  AUTOSCALER_HIGH_WATERMARK = "80"
+  AUTOSCALER_LOW_WATERMARK = "30"
+  AUTOSCALER_MAX_AGENTS = "4"
+  AUTOSCALER_COOLDOWN_SECONDS = "120"
+  AUTOSCALER_CHECK_INTERVAL = "30"
+  AUTOSCALER_AGENT_VM_SIZE = "shared-cpu-2x"
+  AUTOSCALER_AGENT_MEMORY_MB = "2048"
+
+[[mounts]]
+  source = "k3s_data"
+  destination = "/var/lib/rancher/k3s"
+  initial_size = "10gb"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

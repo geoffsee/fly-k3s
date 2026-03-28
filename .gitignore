@@ -1,0 +1,3 @@
+kubeconfig.yaml
+*.bak
+.env
