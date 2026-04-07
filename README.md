@@ -4,27 +4,7 @@ Autoscaling k3s cluster on Fly.io with a GitOps-ready repo structure. Starts wit
 
 ## Architecture
 
-```
-  Fly.io 6PN Private Network
-  ──────────────────────────
-
-  ┌──────────────────────┐     ┌──────────────────────┐
-  │  Server Machine      │     │  Agent Machine 1     │
-  │  (always running)    │     │  (auto-created)      │
-  │                      │     │                      │
-  │  k3s server :6443 ◄──┼─────┤  k3s agent           │
-  │  autoscaler.py       │     │  (stateless)         │
-  │  [Volume: k3s_data]  │     └──────────────────────┘
-  └──────────┬───────────┘
-             │                 ┌──────────────────────┐
-             │                 │  Agent Machine N     │
-             ├─────────────────┤  (auto-created)      │
-             │                 │  k3s agent           │
-             │                 └──────────────────────┘
-             ▼
-    Fly Machines API
-    (create/destroy agents)
-```
+![Architecture](docs/architecture.png)
 
 ## Project Structure
 
@@ -92,6 +72,8 @@ kubectl get nodes
 ```
 
 ### Local Development (Kind)
+
+![Dev Setup](docs/dev-setup.png)
 
 ```bash
 bun run setup     # install all dependencies
