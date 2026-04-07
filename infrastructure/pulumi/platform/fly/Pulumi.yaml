@@ -1,0 +1,6 @@
+name: fly-k3s
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Autoscaling k3s cluster on Fly.io

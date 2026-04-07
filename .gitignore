@@ -1,3 +1,42 @@
-kubeconfig.yaml
-*.bak
+# Secrets & credentials
 .env
+.env.*
+!.env.example
+!.env.*.example
+id_rsa*
+vm-ssh.pk
+vm-ssh.pub
+kubeconfig.yaml
+.kubeconfig.*
+google.json
+*-sa.json
+
+# Generated artifacts
+coreos.ign
+
+# Node
+node_modules/
+*.log
+
+# TypeScript
+*.tsbuildinfo
+bin/
+
+# Rust
+target/
+
+# Pulumi
+.pulumi/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Build artifacts
+dist/
+build/
+*.bak
+package-lock.json

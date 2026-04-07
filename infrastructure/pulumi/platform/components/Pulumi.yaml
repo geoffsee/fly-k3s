@@ -1,0 +1,6 @@
+name: platform-components
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Cluster components - cert-manager, Traefik, PostgreSQL, Zitadel

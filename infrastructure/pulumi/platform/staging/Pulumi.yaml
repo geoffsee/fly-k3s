@@ -1,0 +1,6 @@
+name: staging-cluster
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: GCP staging cluster - CoreOS VM with k0s and GPU

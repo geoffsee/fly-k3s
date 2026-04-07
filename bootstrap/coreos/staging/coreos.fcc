@@ -1,0 +1,33 @@
+variant: fcos
+version: 1.5.0
+passwd:
+  users:
+    - name: core
+      ssh_authorized_keys:
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDzjArJRnPj3O80aSN9S28Akw1SMKh1ZM8xeKR9h6CFD vm-access-key
+systemd:
+  units:
+    - name: podman.socket
+      enabled: true
+      dropins:
+        - name: override.conf
+          contents: |
+            [Socket]
+            ListenStream=0.0.0.0:2375
+    - name: docker.service
+      enabled: true
+    - name: k0s-controller.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Run k0s controller in Docker
+        Wants=docker.socket docker.service network-online.target
+        After=docker.socket docker.service network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStart=/bin/sh -c 'set -e; /usr/bin/docker ps -a --format "{{.Names}}" | grep -qx k0s-controller || /usr/bin/docker run -d --name k0s-controller --hostname k0s-controller -v /var/lib/k0s -v /var/log/pods --tmpfs /run --privileged -p 6443:6443   docker.io/k0sproject/k0s:v1.33.4-k0s.0'
+
+        [Install]
+        WantedBy=multi-user.target

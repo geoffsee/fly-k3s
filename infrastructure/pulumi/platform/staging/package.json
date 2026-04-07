@@ -1,0 +1,19 @@
+{
+  "name": "staging-cluster",
+  "private": true,
+  "scripts": {
+    "up": "pulumi up --yes",
+    "destroy": "pulumi destroy --yes",
+    "preview": "pulumi preview",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@pulumi/gcp": "^8.0.0",
+    "@pulumi/pulumi": "^3.0.0",
+    "dotenv": "^17.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}

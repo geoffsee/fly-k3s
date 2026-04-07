@@ -1,0 +1,18 @@
+{
+  "name": "platform-configurations",
+  "private": true,
+  "scripts": {
+    "up": "pulumi up --yes",
+    "destroy": "pulumi destroy --yes",
+    "preview": "pulumi preview",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.0.0",
+    "@pulumiverse/zitadel": "^0.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}

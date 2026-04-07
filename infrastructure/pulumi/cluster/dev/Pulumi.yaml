@@ -1,0 +1,6 @@
+name: dev-cluster
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Local Kind cluster with Docker registry for development

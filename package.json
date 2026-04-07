@@ -1,0 +1,20 @@
+{
+  "private": true,
+  "workspaces": [
+    "infrastructure/pulumi/**",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "infrastructure/scripts/run.sh",
+    "dev:destroy": "infrastructure/scripts/destroy.sh",
+    "fly:deploy": "cd infrastructure/pulumi/platform/fly && pulumi up --yes",
+    "fly:preview": "cd infrastructure/pulumi/platform/fly && pulumi preview",
+    "fly:destroy": "cd infrastructure/pulumi/platform/fly && pulumi destroy --yes",
+    "staging:deploy": "infrastructure/scripts/deploy_staging.sh",
+    "staging:dry-run": "infrastructure/scripts/deploy_staging_dryrun.sh",
+    "staging:status": "infrastructure/scripts/check_staging_status.sh",
+    "setup": "infrastructure/scripts/setup.sh",
+    "clean": "infrastructure/scripts/cleanup.sh",
+    "test": "for dir in infrastructure/pulumi/cluster/*/ infrastructure/pulumi/platform/*/; do (cd \"$dir\" && bun test); done"
+  }
+}

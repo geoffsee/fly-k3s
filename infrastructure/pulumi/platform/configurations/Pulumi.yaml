@@ -1,0 +1,6 @@
+name: platform-configurations
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Zitadel configuration - organizations, projects, OIDC apps, users
