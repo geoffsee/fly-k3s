@@ -1,11 +1,11 @@
-app = "k3s-cluster"
+app = "k0s-cluster"
 primary_region = "ord"
 
 [build]
   dockerfile = "Dockerfile"
 
 [env]
-  K3S_ROLE = "server"
+  K0S_ROLE = "server"
   AUTOSCALER_HIGH_WATERMARK = "80"
   AUTOSCALER_LOW_WATERMARK = "30"
   AUTOSCALER_MAX_AGENTS = "4"
@@ -15,8 +15,8 @@ primary_region = "ord"
   AUTOSCALER_AGENT_MEMORY_MB = "2048"
 
 [[mounts]]
-  source = "k3s_data"
-  destination = "/var/lib/rancher/k3s"
+  source = "k0s_data"
+  destination = "/var/lib/k0s"
   initial_size = "10gb"
 
 [[vm]]

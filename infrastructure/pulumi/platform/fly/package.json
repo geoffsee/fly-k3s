@@ -1,5 +1,5 @@
 {
-  "name": "fly-k3s",
+  "name": "fly-k0s",
   "private": true,
   "scripts": {
     "up": "pulumi up --yes",
@@ -9,8 +9,7 @@
   },
   "dependencies": {
     "@pulumi/command": "^1.0.0",
-    "@pulumi/pulumi": "^3.0.0",
-    "@pulumi/random": "^4.0.0"
+    "@pulumi/pulumi": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
