@@ -1,0 +1,4 @@
+config:
+  fly-k0s:appName: k0s-cluster
+  fly-k0s:region: ord
+  fly-k0s:org: personal

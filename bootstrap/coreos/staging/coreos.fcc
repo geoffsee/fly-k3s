@@ -4,7 +4,7 @@ passwd:
   users:
     - name: core
       ssh_authorized_keys:
-        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDzjArJRnPj3O80aSN9S28Akw1SMKh1ZM8xeKR9h6CFD vm-access-key
+        - ssh-ed25519 xyz vm-access-key
 systemd:
   units:
     - name: podman.socket

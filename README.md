@@ -1,6 +1,6 @@
-# fly-k3s
+# fly-k0s
 
-Autoscaling k3s cluster on Fly.io with a GitOps-ready repo structure. Starts with a single server node and automatically scales agent nodes from 0 to N based on resource pressure.
+Autoscaling k0s cluster on Fly.io with a GitOps-ready repo structure. Starts with a single controller node (with worker enabled) and automatically scales worker nodes from 0 to N based on resource pressure.
 
 ## Architecture
 
@@ -12,16 +12,16 @@ Autoscaling k3s cluster on Fly.io with a GitOps-ready repo structure. Starts wit
 ├── infrastructure/             # Pulumi IaC
 │   ├── pulumi/
 │   │   ├── platform/
-│   │   │   ├── fly/            # Fly.io k3s cluster
+│   │   │   ├── fly/            # Fly.io k0s cluster
 │   │   │   ├── staging/        # GCP CoreOS VM + GPU
 │   │   │   ├── components/     # Helm: cert-manager, Traefik, PostgreSQL, Zitadel
 │   │   │   └── configurations/ # Zitadel orgs, projects, OIDC apps, users
 │   │   ├── cluster/
-│   │   │   └── dev/            # Local Kind cluster + Docker registry
+│   │   │   └── dev/            # Local k0s-in-Docker cluster + registry
 │   │   └── modules/            # Reusable Pulumi components
 │   └── scripts/                # Deploy, destroy, setup scripts
 ├── bootstrap/                  # Machine/bootstrap artifacts
-│   ├── k3s/                    # Dockerfile, fly.toml, entrypoints, autoscaler
+│   ├── k0s/                    # Dockerfile, fly.toml, entrypoints, autoscaler
 │   └── coreos/staging/         # Ignition config, SSH key generation
 ├── platform/                   # Shared cluster services (GitOps manifests)
 │   ├── metrics-server/
@@ -55,7 +55,7 @@ pulumi login
 cd infrastructure/pulumi/platform/fly
 bun install
 pulumi stack init prod
-pulumi config set appName k3s-cluster
+pulumi config set appName k0s-cluster
 pulumi config set region ord
 pulumi up --yes
 ```
@@ -63,21 +63,21 @@ pulumi up --yes
 Then get your kubeconfig:
 
 ```bash
-fly ssh console -a k3s-cluster -C 'cat /var/lib/rancher/k3s/k3s.yaml' > kubeconfig.yaml
-fly proxy 6443:6443 -a k3s-cluster &
+fly ssh console -a k0s-cluster -C 'cat /var/lib/k0s/pki/admin.conf' > kubeconfig.yaml
+fly proxy 6443:6443 -a k0s-cluster &
 
 # Edit kubeconfig.yaml: change server to https://127.0.0.1:6443
 export KUBECONFIG=./kubeconfig.yaml
 kubectl get nodes
 ```
 
-### Local Development (Kind)
+### Local Development (k0s-in-Docker)
 
 ![Dev Setup](docs/dev-setup.png)
 
 ```bash
 bun run setup     # install all dependencies
-bun run dev       # deploy Kind cluster + platform components + Zitadel config
+bun run dev       # deploy k0s cluster + platform components + Zitadel config
 bun run dev:destroy
 ```
 
@@ -105,22 +105,22 @@ cd infrastructure/pulumi/platform/fly && bun test   # single project
 
 ## Autoscaler Configuration
 
-Set in `bootstrap/k3s/fly.toml`:
+Set in `bootstrap/k0s/fly.toml`:
 
 | Variable | Default | Description |
 |---|---|---|
 | `AUTOSCALER_HIGH_WATERMARK` | `80` | Scale up when allocation > this % |
 | `AUTOSCALER_LOW_WATERMARK` | `30` | Scale down when allocation < this % |
-| `AUTOSCALER_MAX_AGENTS` | `4` | Maximum agent machines |
+| `AUTOSCALER_MAX_AGENTS` | `4` | Maximum worker machines |
 | `AUTOSCALER_COOLDOWN_SECONDS` | `120` | Seconds between scaling events |
 | `AUTOSCALER_CHECK_INTERVAL` | `30` | Seconds between metric checks |
-| `AUTOSCALER_AGENT_VM_SIZE` | `shared-cpu-2x` | VM size for agents |
-| `AUTOSCALER_AGENT_MEMORY_MB` | `2048` | Memory (MB) for agents |
+| `AUTOSCALER_AGENT_VM_SIZE` | `shared-cpu-2x` | VM size for workers |
+| `AUTOSCALER_AGENT_MEMORY_MB` | `2048` | Memory (MB) for workers |
 
 ## Monitoring
 
 ```bash
-fly logs -a k3s-cluster | grep autoscaler
+fly logs -a k0s-cluster | grep autoscaler
 kubectl get nodes
 kubectl top nodes
 ```

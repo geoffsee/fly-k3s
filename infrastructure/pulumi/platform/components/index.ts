@@ -5,8 +5,8 @@ import * as command from "@pulumi/command/local";
 // ---------------------------------------------------------------------------
 // Configuration from environment
 // ---------------------------------------------------------------------------
-const kubeConfigPath = process.env.KUBECONFIG || "~/.kube/config";
-const kubeContext = process.env.KUBE_CONTEXT || "kind-kind";
+const kubeConfigPath = process.env.KUBECONFIG || `${process.env.HOME}/.kube/k0s-dev`;
+const kubeContext = process.env.KUBE_CONTEXT || "k0s-dev";
 const zitadelDomain = process.env.ZITADEL_DOMAIN || "machine.127.0.0.1.sslip.io";
 
 // ---------------------------------------------------------------------------

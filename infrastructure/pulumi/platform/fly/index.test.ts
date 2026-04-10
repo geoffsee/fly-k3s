@@ -8,37 +8,27 @@ pulumi.runtime.setMocks({
         state: args.inputs,
     }),
     call: (args: pulumi.runtime.MockCallArgs) => args.inputs,
-}, "fly-k3s", "test");
+}, "fly-k0s", "test");
 
 function promiseOf<T>(output: pulumi.Output<T>): Promise<T> {
     return new Promise(resolve => output.apply(resolve));
 }
 
-describe("fly k3s deployment", () => {
+describe("fly k0s deployment", () => {
     let infra: typeof import("./index");
 
     beforeAll(async () => {
         infra = await import("./index");
     });
 
-    test("app creation command references k3s-cluster", async () => {
+    test("app creation command references k0s-cluster", async () => {
         const cmd = await promiseOf(infra.createApp.create);
-        expect(cmd).toContain("k3s-cluster");
+        expect(cmd).toContain("k0s-cluster");
     });
 
     test("volume creation specifies 10GB", async () => {
         const cmd = await promiseOf(infra.createVolume.create);
         expect(cmd).toContain("--size 10");
-    });
-
-    test("k3s token is 64 characters", async () => {
-        const length = await promiseOf(infra.k3sToken.length);
-        expect(length).toBe(64);
-    });
-
-    test("k3s token has no special characters", async () => {
-        const special = await promiseOf(infra.k3sToken.special);
-        expect(special).toBe(false);
     });
 
     test("deploy command runs fly deploy", async () => {
