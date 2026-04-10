@@ -19,6 +19,15 @@ spec:
     sans:
       - ${FLY_APP_NAME}.internal
       - ${FLY_PRIVATE_IP}
+      - 127.0.0.1
+      - localhost
+  network:
+    dualStack:
+      enabled: true
+      IPv4podCIDR: "10.244.0.0/16"
+      IPv4serviceCIDR: "10.96.0.0/12"
+      IPv6podCIDR: "fd00::/108"
+      IPv6serviceCIDR: "fd01::/108"
   telemetry:
     enabled: false
 EOF

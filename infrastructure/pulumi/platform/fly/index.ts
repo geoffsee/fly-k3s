@@ -35,20 +35,27 @@ const setDeployToken = new command.local.Command("set-deploy-token", {
     create: `DEPLOY_TOKEN=$(fly tokens deploy --app "${appName}") && fly secrets set "FLY_API_TOKEN=$DEPLOY_TOKEN" --app "${appName}" --stage`,
 }, {dependsOn: [createApp]});
 
-let dockerfileContent: string;
-try {
-    dockerfileContent = fs.readFileSync(path.join(k0sDir, "Dockerfile"), "utf-8");
-} catch (_) {
-    dockerfileContent = "";
+function hashDir(dir: string): string {
+    const hash = crypto.createHash("sha256");
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            hash.update(hashDir(fullPath));
+        } else {
+            hash.update(entry.name);
+            hash.update(fs.readFileSync(fullPath));
+        }
+    }
+    return hash.digest("hex");
 }
-const dockerfileHash = crypto.createHash("sha256")
-    .update(dockerfileContent)
-    .digest("hex");
+
+const k0sDirHash = hashDir(k0sDir);
 
 export const deploy = new command.local.Command("deploy", {
     create: `fly deploy --app "${appName}" --yes`,
     dir: k0sDir,
-    triggers: [dockerfileHash],
+    triggers: [k0sDirHash],
 }, {dependsOn: [createVolume, setDeployToken]});
 
 export const outputAppName = appName;
