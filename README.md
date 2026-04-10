@@ -17,7 +17,7 @@ Autoscaling k0s cluster on Fly.io with a GitOps-ready repo structure. Starts wit
 │   │   │   ├── components/     # Helm: cert-manager, Traefik, PostgreSQL, Zitadel
 │   │   │   └── configurations/ # Zitadel orgs, projects, OIDC apps, users
 │   │   ├── cluster/
-│   │   │   └── dev/            # Local Kind cluster + Docker registry
+│   │   │   └── dev/            # Local k0s-in-Docker cluster + registry
 │   │   └── modules/            # Reusable Pulumi components
 │   └── scripts/                # Deploy, destroy, setup scripts
 ├── bootstrap/                  # Machine/bootstrap artifacts
@@ -71,13 +71,13 @@ export KUBECONFIG=./kubeconfig.yaml
 kubectl get nodes
 ```
 
-### Local Development (Kind)
+### Local Development (k0s-in-Docker)
 
 ![Dev Setup](docs/dev-setup.png)
 
 ```bash
 bun run setup     # install all dependencies
-bun run dev       # deploy Kind cluster + platform components + Zitadel config
+bun run dev       # deploy k0s cluster + platform components + Zitadel config
 bun run dev:destroy
 ```
 

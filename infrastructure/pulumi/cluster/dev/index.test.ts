@@ -27,19 +27,22 @@ describe("dev cluster", () => {
         expect(ports![0].internal).toBe(5000);
     });
 
-    test("registry container is named kind-registry", async () => {
+    test("registry container is named k0s-registry", async () => {
         const name = await promiseOf(infra.registryContainer.name);
-        expect(name).toBe("kind-registry");
+        expect(name).toBe("k0s-registry");
     });
 
-    test("kind cluster create command includes kind create cluster", async () => {
-        const create = await promiseOf(infra.kindCluster.create);
-        expect(create).toContain("kind create cluster");
+    test("k0s controller is privileged", async () => {
+        const privileged = await promiseOf(infra.k0sController.privileged);
+        expect(privileged).toBe(true);
     });
 
-    test("kind cluster delete command includes kind delete cluster", async () => {
-        const del = await promiseOf(infra.kindCluster.delete);
-        expect(del).toContain("kind delete cluster");
+    test("k0s controller maps API port 6443", async () => {
+        const ports = await promiseOf(infra.k0sController.ports);
+        expect(ports).toBeDefined();
+        const apiPort = ports!.find(p => p.internal === 6443);
+        expect(apiPort).toBeDefined();
+        expect(apiPort!.external).toBe(6443);
     });
 
     test("configmap is in kube-public namespace", async () => {

@@ -8,7 +8,8 @@ RUN apk add --no-cache \
 
 # Install k0s binary
 ARG K0S_VERSION=v1.31.3+k0s.0
-RUN curl -fsSL "https://github.com/k0sproject/k0s/releases/download/${K0S_VERSION}/k0s-${K0S_VERSION}-amd64" -o /usr/local/bin/k0s \
+ARG TARGETARCH
+RUN curl -fsSL "https://github.com/k0sproject/k0s/releases/download/${K0S_VERSION}/k0s-${K0S_VERSION}-${TARGETARCH}" -o /usr/local/bin/k0s \
     && chmod +x /usr/local/bin/k0s
 
 COPY scripts/entrypoint-server.sh /usr/local/bin/entrypoint-server.sh
