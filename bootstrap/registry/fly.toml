@@ -1,0 +1,23 @@
+app = "k0s-registry"
+primary_region = "ord"
+
+[build]
+  image = "registry:2"
+
+[env]
+  REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY = "/var/lib/registry"
+
+[mounts]
+  source = "registry_data"
+  destination = "/var/lib/registry"
+
+[[services]]
+  internal_port = 5000
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 5000
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
