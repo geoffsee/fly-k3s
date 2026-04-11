@@ -73,6 +73,14 @@ set -e
 # Build the operator image targeting amd64 (Fly machines)
 docker buildx build --platform linux/amd64 --load -t ${operatorImage} -f "${operatorDir}/Dockerfile" "${repoRoot}"
 
+# Ensure k0s machine is running and ready
+fly machine list -a "${appName}" --json | jq -r ".[0].id" | xargs -I{} fly machine start {} -a "${appName}" 2>/dev/null || true
+echo "Waiting for k0s to be ready..."
+for i in $(seq 1 60); do
+  fly ssh console -a "${appName}" -C "k0s kubectl --data-dir /var/lib/k0s get nodes" >/dev/null 2>&1 && break
+  sleep 5
+done
+
 # Import image into k0s containerd via fly ssh
 docker save ${operatorImage} | gzip | fly ssh console -a "${appName}" -C "gunzip | k0s ctr --address /run/k0s/containerd.sock -n k8s.io images import -"
 
