@@ -1,4 +1,4 @@
-# fly-k0s
+# fly-kube
 
 Autoscaling k0s cluster on Fly.io with namespace-per-tenant isolation, a Rust tenant operator, and a gateway API for provisioning.
 
