@@ -60,54 +60,21 @@ export const deploy = new command.local.Command("deploy", {
 
 const repoRoot = path.resolve(__dirname, "../../../..");
 
-// --- Container Registry ---
-
-const registryAppName = config.get("registryAppName") || "k0s-registry";
-const registryDir = path.resolve(__dirname, "../../../../bootstrap/registry");
-
-const createRegistryApp = new command.local.Command("create-registry-app", {
-    create: `fly apps list --json | grep -q '"${registryAppName}"' || fly apps create "${registryAppName}" --org "${org}"`,
-    delete: `fly apps destroy "${registryAppName}" --yes 2>/dev/null || true`,
-}, {dependsOn: [deploy]});
-
-const createRegistryVolume = new command.local.Command("create-registry-volume", {
-    create: `fly volumes list --app "${registryAppName}" --json 2>/dev/null | grep -q '"registry_data"' || fly volumes create registry_data --size 1 --region "${region}" --app "${registryAppName}" --yes`,
-}, {dependsOn: [createRegistryApp]});
-
-const updateRegistryFlyToml = new command.local.Command("update-registry-fly-toml", {
-    create: [
-        `sed -i.bak 's/^app = .*/app = "${registryAppName}"/' fly.toml`,
-        `sed -i.bak 's/^primary_region = .*/primary_region = "${region}"/' fly.toml`,
-        `rm -f fly.toml.bak`,
-    ].join(" && "),
-    dir: registryDir,
-    triggers: [registryAppName, region],
-});
-
-const deployRegistry = new command.local.Command("deploy-registry", {
-    create: `fly deploy --app "${registryAppName}" --yes`,
-    dir: registryDir,
-}, {dependsOn: [createRegistryVolume, updateRegistryFlyToml]});
-
 // --- Tenant Operator ---
 
 const operatorDir = path.resolve(__dirname, "../../../../packages/tenant-operator");
 const operatorDirHash = hashDir(operatorDir);
+const operatorImage = "docker.io/library/tenant-operator:latest";
 
-// Build operator image, push to registry via fly proxy, then kubectl apply the manifest
+// Build operator image, load into k0s via docker save + fly ssh, then kubectl apply
 const deployOperator = new command.local.Command("deploy-operator", {
     create: `bash -c '
 set -e
 # Build the operator image targeting amd64 (Fly machines)
-docker buildx build --platform linux/amd64 --load -t 127.0.0.1:15000/tenant-operator:latest -f "${operatorDir}/Dockerfile" "${repoRoot}"
+docker buildx build --platform linux/amd64 --load -t ${operatorImage} -f "${operatorDir}/Dockerfile" "${repoRoot}"
 
-# Push image to registry via fly proxy
-fly proxy 15000:5000 -a "${registryAppName}" -b 127.0.0.1 &
-REG_PID=$!
-sleep 5
-docker push 127.0.0.1:15000/tenant-operator:latest
-kill $REG_PID 2>/dev/null || true
-wait $REG_PID 2>/dev/null || true
+# Import image into k0s containerd via fly ssh
+docker save ${operatorImage} | gzip | fly ssh console -a "${appName}" -C "gunzip | k0s ctr --address /run/k0s/containerd.sock -n k8s.io images import -"
 
 # Apply operator manifest via fly proxy to k8s API
 fly proxy 6443:6443 -a "${appName}" -b 127.0.0.1 &
@@ -116,15 +83,13 @@ sleep 3
 fly ssh console -a "${appName}" -C "cat /var/lib/k0s/pki/admin.conf" 2>/dev/null \\
   | sed "s|server: https://.*:6443|server: https://127.0.0.1:6443|" > /tmp/k0s-pulumi-kubeconfig
 KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl apply -f "${operatorDir}/deploy/manifest.yaml"
-KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl set image deployment/tenant-operator \\
-  tenant-operator=${registryAppName}.internal:5000/tenant-operator:latest -n tenant-operator
 KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl rollout status deployment/tenant-operator -n tenant-operator --timeout=120s
 kill $K8S_PID 2>/dev/null || true
 wait $K8S_PID 2>/dev/null || true
 rm -f /tmp/k0s-pulumi-kubeconfig
 '`,
     triggers: [operatorDirHash],
-}, {dependsOn: [deployRegistry, deploy]});
+}, {dependsOn: [deploy]});
 
 // --- Tenant Gateway ---
 

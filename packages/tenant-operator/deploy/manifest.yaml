@@ -66,7 +66,8 @@ spec:
       serviceAccountName: tenant-operator
       containers:
         - name: tenant-operator
-          image: tenant-operator:latest
+          image: docker.io/library/tenant-operator:latest
+          imagePullPolicy: Never
           env:
             - name: RUST_LOG
               value: tenant_operator=info
