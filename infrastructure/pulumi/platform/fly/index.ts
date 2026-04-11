@@ -96,26 +96,33 @@ const operatorDirHash = hashDir(operatorDir);
 
 // Build operator image, push to registry via fly proxy, then kubectl apply the manifest
 const deployOperator = new command.local.Command("deploy-operator", {
-    create: [
-        // Build the operator image targeting amd64 (Fly machines)
-        `docker buildx build --platform linux/amd64 -t localhost:5000/tenant-operator:latest -f "${operatorDir}/Dockerfile" "${repoRoot}"`,
-        // Start fly proxy to the registry in background
-        `fly proxy 5000:5000 -a "${registryAppName}" & PROXY_PID=$!`,
-        `sleep 2`,
-        // Push image through the proxy
-        `docker push localhost:5000/tenant-operator:latest`,
-        `kill $PROXY_PID`,
-        // Apply the operator manifest via fly proxy to the k8s API
-        `fly proxy 6443:6443 -a "${appName}" & PROXY_PID=$!`,
-        `sleep 2`,
-        // Write kubeconfig with localhost server for kubectl
-        `fly ssh console -a "${appName}" -C 'cat /var/lib/k0s/pki/admin.conf' 2>/dev/null | sed 's|server: https://.*:6443|server: https://127.0.0.1:6443|' > /tmp/k0s-pulumi-kubeconfig`,
-        `KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl apply -f "${operatorDir}/deploy/manifest.yaml"`,
-        `KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl set image deployment/tenant-operator tenant-operator=${registryAppName}.internal:5000/tenant-operator:latest -n tenant-operator`,
-        `KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl rollout status deployment/tenant-operator -n tenant-operator --timeout=120s`,
-        `kill $PROXY_PID`,
-        `rm -f /tmp/k0s-pulumi-kubeconfig`,
-    ].join(" && "),
+    create: `bash -c '
+set -e
+# Build the operator image targeting amd64 (Fly machines)
+docker buildx build --platform linux/amd64 --load -t localhost:5000/tenant-operator:latest -f "${operatorDir}/Dockerfile" "${repoRoot}"
+
+# Push image to registry via fly proxy
+fly proxy 5000:5000 -a "${registryAppName}" &
+REG_PID=$!
+sleep 3
+docker push localhost:5000/tenant-operator:latest
+kill $REG_PID 2>/dev/null || true
+wait $REG_PID 2>/dev/null || true
+
+# Apply operator manifest via fly proxy to k8s API
+fly proxy 6443:6443 -a "${appName}" &
+K8S_PID=$!
+sleep 3
+fly ssh console -a "${appName}" -C "cat /var/lib/k0s/pki/admin.conf" 2>/dev/null \\
+  | sed "s|server: https://.*:6443|server: https://127.0.0.1:6443|" > /tmp/k0s-pulumi-kubeconfig
+KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl apply -f "${operatorDir}/deploy/manifest.yaml"
+KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl set image deployment/tenant-operator \\
+  tenant-operator=${registryAppName}.internal:5000/tenant-operator:latest -n tenant-operator
+KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl rollout status deployment/tenant-operator -n tenant-operator --timeout=120s
+kill $K8S_PID 2>/dev/null || true
+wait $K8S_PID 2>/dev/null || true
+rm -f /tmp/k0s-pulumi-kubeconfig
+'`,
     triggers: [operatorDirHash],
 }, {dependsOn: [deployRegistry, deploy]});
 
