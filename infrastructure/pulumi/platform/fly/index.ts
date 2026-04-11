@@ -98,7 +98,11 @@ sleep 3
 fly ssh console -a "${appName}" -C "cat /var/lib/k0s/pki/admin.conf" 2>/dev/null \\
   | sed "s|server: https://.*:6443|server: https://127.0.0.1:6443|" > /tmp/k0s-pulumi-kubeconfig
 KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl apply -f "${operatorDir}/deploy/manifest.yaml"
-KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl rollout status deployment/tenant-operator -n tenant-operator --timeout=120s
+for attempt in 1 2 3; do
+  KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl rollout status deployment/tenant-operator -n tenant-operator --timeout=120s && break
+  echo "Rollout attempt $attempt failed, retrying..."
+  sleep 10
+done
 kill $K8S_PID 2>/dev/null || true
 wait $K8S_PID 2>/dev/null || true
 rm -f /tmp/k0s-pulumi-kubeconfig
