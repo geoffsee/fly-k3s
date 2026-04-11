@@ -99,13 +99,13 @@ const deployOperator = new command.local.Command("deploy-operator", {
     create: `bash -c '
 set -e
 # Build the operator image targeting amd64 (Fly machines)
-docker buildx build --platform linux/amd64 --load -t 127.0.0.1:5000/tenant-operator:latest -f "${operatorDir}/Dockerfile" "${repoRoot}"
+docker buildx build --platform linux/amd64 --load -t 127.0.0.1:15000/tenant-operator:latest -f "${operatorDir}/Dockerfile" "${repoRoot}"
 
 # Push image to registry via fly proxy
-fly proxy 5000:5000 -a "${registryAppName}" -b 127.0.0.1 &
+fly proxy 15000:5000 -a "${registryAppName}" -b 127.0.0.1 &
 REG_PID=$!
 sleep 5
-docker push 127.0.0.1:5000/tenant-operator:latest
+docker push 127.0.0.1:15000/tenant-operator:latest
 kill $REG_PID 2>/dev/null || true
 wait $REG_PID 2>/dev/null || true
 
