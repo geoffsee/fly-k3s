@@ -82,7 +82,7 @@ for i in $(seq 1 60); do
 done
 
 # Import image into k0s containerd via fly ssh
-docker save ${operatorImage} | gzip | fly ssh console -a "${appName}" -C "gunzip | k0s ctr --address /run/k0s/containerd.sock -n k8s.io images import -"
+docker save ${operatorImage} | gzip | fly ssh console -a "${appName}" -C "sh -c '"'"'gunzip | k0s ctr --address /run/k0s/containerd.sock -n k8s.io images import -'"'"'"
 
 # Apply operator manifest via fly proxy to k8s API
 fly proxy 6443:6443 -a "${appName}" -b 127.0.0.1 &
