@@ -89,9 +89,10 @@ const updateGatewayFlyToml = new command.local.Command("update-gateway-fly-toml"
 
 const gatewayDirHash = hashDir(gatewayDir);
 
+const repoRoot = path.resolve(__dirname, "../../../..");
 const deployGateway = new command.local.Command("deploy-gateway", {
-    create: `fly deploy --app "${gatewayAppName}" --yes`,
-    dir: gatewayDir,
+    create: `fly deploy --app "${gatewayAppName}" --config "${gatewayDir}/fly.toml" --dockerfile "${gatewayDir}/Dockerfile" --yes`,
+    dir: repoRoot,
     triggers: [gatewayDirHash],
 }, {dependsOn: [setGatewaySecrets, updateGatewayFlyToml]});
 

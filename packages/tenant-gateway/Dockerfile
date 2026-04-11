@@ -1,4 +1,4 @@
-FROM rust:1.86-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY packages/tenant-crd packages/tenant-crd
@@ -9,6 +9,6 @@ RUN mkdir -p packages/dev-proxy/src && echo "fn main() {}" > packages/dev-proxy/
 RUN mkdir -p packages/tenant-operator/src && echo "fn main() {}" > packages/tenant-operator/src/main.rs
 RUN cargo build --release -p tenant-gateway
 
-FROM gcr.io/distroless/base-debian13
+FROM gcr.io/distroless/cc-debian12
 COPY --from=builder /build/target/release/tenant-gateway /usr/local/bin/tenant-gateway
 ENTRYPOINT ["tenant-gateway"]
