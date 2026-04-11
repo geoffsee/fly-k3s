@@ -36,12 +36,15 @@ EOF
 mkdir -p /var/lib/k0s/manifests/default
 cp -f /default-manifests/*.yaml /var/lib/k0s/manifests/default/ 2>/dev/null || true
 
+# Get the IPv4 address for kubelet (kube-router requires IPv4)
+NODE_IPV4=$(ip -4 addr show eth0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+
 # Start k0s controller with worker enabled (server node runs workloads)
 k0s controller \
   --config /etc/k0s/k0s.yaml \
   --data-dir /var/lib/k0s \
   --enable-worker \
-  --kubelet-extra-args="--node-ip=${FLY_PRIVATE_IP}" &
+  --kubelet-extra-args="--node-ip=${NODE_IPV4}" &
 
 K0S_PID=$!
 
