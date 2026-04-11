@@ -32,21 +32,6 @@ spec:
     enabled: false
 EOF
 
-# Configure containerd to trust the internal registry
-mkdir -p /etc/k0s/containerd.d
-mkdir -p /etc/k0s/containerd/certs.d/k0s-registry.internal:5000
-cat > /etc/k0s/containerd.d/registry.toml <<REGEOF
-[plugins."io.containerd.grpc.v1.cri".registry]
-  config_path = "/etc/k0s/containerd/certs.d"
-REGEOF
-
-cat > /etc/k0s/containerd/certs.d/k0s-registry.internal:5000/hosts.toml <<REGEOF
-server = "http://k0s-registry.internal:5000"
-
-[host."http://k0s-registry.internal:5000"]
-  capabilities = ["pull", "resolve"]
-REGEOF
-
 # Copy auto-deploy manifests into the k0s manifests directory
 mkdir -p /var/lib/k0s/manifests/default
 cp -f /default-manifests/*.yaml /var/lib/k0s/manifests/default/ 2>/dev/null || true

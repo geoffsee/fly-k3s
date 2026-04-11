@@ -64,6 +64,10 @@ spec:
         app: tenant-operator
     spec:
       serviceAccountName: tenant-operator
+      tolerations:
+        - key: "node-role.kubernetes.io/master"
+          operator: "Exists"
+          effect: "NoSchedule"
       containers:
         - name: tenant-operator
           image: docker.io/library/tenant-operator:latest
