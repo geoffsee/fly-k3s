@@ -33,6 +33,7 @@ spec:
 EOF
 
 # Configure containerd to trust the internal registry
+mkdir -p /etc/k0s/containerd.d
 mkdir -p /etc/k0s/containerd/certs.d/k0s-registry.internal:5000
 cat > /etc/k0s/containerd.d/registry.toml <<REGEOF
 [plugins."io.containerd.grpc.v1.cri".registry]
