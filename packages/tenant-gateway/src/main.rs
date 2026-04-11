@@ -5,7 +5,8 @@ mod ui;
 use axum::middleware;
 use axum::routing::{delete, get, post};
 use axum::Router;
-use kube::Client;
+use kube::config::{KubeConfigOptions, Kubeconfig};
+use kube::{Client, Config};
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -24,7 +25,14 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let client = Client::try_default().await?;
+    let client = match std::env::var("KUBECONFIG_DATA") {
+        Ok(data) => {
+            let kubeconfig = Kubeconfig::from_yaml(&data)?;
+            let config = Config::from_custom_kubeconfig(kubeconfig, &KubeConfigOptions::default()).await?;
+            Client::try_from(config)?
+        }
+        Err(_) => Client::try_default().await?,
+    };
     let state = Arc::new(AppState { client });
 
     let app = Router::new()

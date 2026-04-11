@@ -73,9 +73,18 @@ const createGatewayApp = new command.local.Command("create-gateway-app", {
     delete: `fly apps destroy "${gatewayAppName}" --yes 2>/dev/null || true`,
 }, {dependsOn: [deploy]});
 
+// Pull kubeconfig from k0s controller and rewrite server URL to Fly internal address
+const fetchKubeconfig = new command.local.Command("fetch-kubeconfig", {
+    create: [
+        `KUBECONFIG=$(fly ssh console -a "${appName}" -C 'cat /var/lib/k0s/pki/admin.conf' 2>/dev/null)`,
+        `KUBECONFIG=$(echo "$KUBECONFIG" | sed 's|server: https://.*:6443|server: https://${appName}.internal:6443|')`,
+        `echo "$KUBECONFIG"`,
+    ].join(" && "),
+}, {dependsOn: [deploy]});
+
 const setGatewaySecrets = new command.local.Command("set-gateway-secrets", {
-    create: pulumi.interpolate`fly secrets set "ADMIN_USER=${adminUser}" "ADMIN_PASS=${adminPass}" --app "${gatewayAppName}" --stage`,
-}, {dependsOn: [createGatewayApp]});
+    create: pulumi.interpolate`fly secrets set "ADMIN_USER=${adminUser}" "ADMIN_PASS=${adminPass}" "KUBECONFIG_DATA=${fetchKubeconfig.stdout}" --app "${gatewayAppName}" --stage`,
+}, {dependsOn: [createGatewayApp, fetchKubeconfig]});
 
 const updateGatewayFlyToml = new command.local.Command("update-gateway-fly-toml", {
     create: [
