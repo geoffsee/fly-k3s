@@ -6,6 +6,10 @@ echo "[server] Starting k0s controller node"
 # Create data directory
 mkdir -p /var/lib/k0s
 
+# Get the IPv4 address for the node
+NODE_IPV4=$(ip -4 addr show eth0 | awk '/inet / {split($2, a, "/"); print a[1]; exit}')
+echo "[server] Node IPv4: ${NODE_IPV4}"
+
 # Generate k0s cluster config
 mkdir -p /etc/k0s
 cat > /etc/k0s/k0s.yaml <<EOF
@@ -15,19 +19,16 @@ metadata:
   name: k0s
 spec:
   api:
-    address: ${FLY_PRIVATE_IP}
+    address: ${NODE_IPV4}
     sans:
       - ${FLY_APP_NAME}.internal
       - ${FLY_PRIVATE_IP}
+      - ${NODE_IPV4}
       - 127.0.0.1
       - localhost
   network:
-    dualStack:
-      enabled: true
-      IPv4podCIDR: "10.244.0.0/16"
-      IPv4serviceCIDR: "10.96.0.0/12"
-      IPv6podCIDR: "fd00::/108"
-      IPv6serviceCIDR: "fd01::/108"
+    podCIDR: "10.244.0.0/16"
+    serviceCIDR: "10.96.0.0/12"
   telemetry:
     enabled: false
 EOF
@@ -36,15 +37,12 @@ EOF
 mkdir -p /var/lib/k0s/manifests/default
 cp -f /default-manifests/*.yaml /var/lib/k0s/manifests/default/ 2>/dev/null || true
 
-# Get both IPv4 and IPv6 addresses for kubelet (dual-stack)
-NODE_IPV4=$(ip -4 addr show eth0 | awk '/inet / {split($2, a, "/"); print a[1]; exit}')
-
 # Start k0s controller with worker enabled (server node runs workloads)
 k0s controller \
   --config /etc/k0s/k0s.yaml \
   --data-dir /var/lib/k0s \
   --enable-worker \
-  --kubelet-extra-args="--node-ip=${NODE_IPV4},${FLY_PRIVATE_IP}" &
+  --kubelet-extra-args="--node-ip=${NODE_IPV4}" &
 
 K0S_PID=$!
 
