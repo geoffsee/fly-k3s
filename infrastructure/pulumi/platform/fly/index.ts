@@ -81,6 +81,13 @@ for i in $(seq 1 60); do
   sleep 5
 done
 
+# Wait for containerd to be ready
+echo "Waiting for containerd..."
+for i in $(seq 1 30); do
+  fly ssh console -a "${appName}" -C "k0s ctr --address /run/k0s/containerd.sock -n k8s.io images ls -q" >/dev/null 2>&1 && break
+  sleep 5
+done
+
 # Import image into k0s containerd via fly ssh
 docker save ${operatorImage} | gzip | fly ssh console -a "${appName}" -C "sh -c '"'"'gunzip | k0s ctr --address /run/k0s/containerd.sock -n k8s.io images import -'"'"'"
 
