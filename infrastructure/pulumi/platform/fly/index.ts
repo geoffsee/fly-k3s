@@ -58,8 +58,51 @@ export const deploy = new command.local.Command("deploy", {
     triggers: [k0sDirHash],
 }, {dependsOn: [createVolume, setDeployToken]});
 
+// --- Tenant Gateway ---
+
+const gatewayAppName = config.get("gatewayAppName") || "tenant-gateway";
+const gatewayDir = path.resolve(__dirname, "../../../../packages/tenant-gateway");
+
+const adminUser = config.get("gatewayAdminUser") || "admin";
+const adminPass = config.getSecret("gatewayAdminPass") || pulumi.output(
+    crypto.randomBytes(32).toString("base64url")
+);
+
+const createGatewayApp = new command.local.Command("create-gateway-app", {
+    create: `fly apps list --json | grep -q '"${gatewayAppName}"' || fly apps create "${gatewayAppName}" --org "${org}"`,
+    delete: `fly apps destroy "${gatewayAppName}" --yes 2>/dev/null || true`,
+}, {dependsOn: [deploy]});
+
+const setGatewaySecrets = new command.local.Command("set-gateway-secrets", {
+    create: pulumi.interpolate`fly secrets set "ADMIN_USER=${adminUser}" "ADMIN_PASS=${adminPass}" --app "${gatewayAppName}" --stage`,
+}, {dependsOn: [createGatewayApp]});
+
+const updateGatewayFlyToml = new command.local.Command("update-gateway-fly-toml", {
+    create: [
+        `sed -i.bak 's/^app = .*/app = "${gatewayAppName}"/' fly.toml`,
+        `sed -i.bak 's/^primary_region = .*/primary_region = "${region}"/' fly.toml`,
+        `rm -f fly.toml.bak`,
+    ].join(" && "),
+    dir: gatewayDir,
+    triggers: [gatewayAppName, region],
+});
+
+const gatewayDirHash = hashDir(gatewayDir);
+
+const deployGateway = new command.local.Command("deploy-gateway", {
+    create: `fly deploy --app "${gatewayAppName}" --yes`,
+    dir: gatewayDir,
+    triggers: [gatewayDirHash],
+}, {dependsOn: [setGatewaySecrets, updateGatewayFlyToml]});
+
+// --- Outputs ---
+
 export const outputAppName = appName;
 export const outputRegion = region;
 export const outputKubeconfigCmd = `fly ssh console -a ${appName} -C 'cat /var/lib/k0s/pki/admin.conf'`;
 export const outputProxyCmd = `fly proxy 6443:6443 -a ${appName}`;
 export const outputLogsCmd = `fly logs -a ${appName} | grep autoscaler`;
+export const outputGatewayAppName = gatewayAppName;
+export const outputGatewayUrl = `https://${gatewayAppName}.fly.dev`;
+export const outputGatewayAdminUser = adminUser;
+export const outputGatewayAdminPass = adminPass;

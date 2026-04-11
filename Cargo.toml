@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["packages/dev-proxy"]
+members = ["packages/dev-proxy", "packages/tenant-crd", "packages/tenant-operator", "packages/tenant-gateway"]

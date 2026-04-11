@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-operator
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tenant-operator
+  namespace: tenant-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-operator
+rules:
+  # Manage the Tenant CRD itself
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "create", "patch"]
+  # Watch and update Tenant resources
+  - apiGroups: ["platform.fly-k3s.io"]
+    resources: ["tenants", "tenants/status"]
+    verbs: ["get", "list", "watch", "patch"]
+  # Create and manage tenant namespaces
+  - apiGroups: [""]
+    resources: ["namespaces", "resourcequotas", "limitranges", "serviceaccounts"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  # Network policies
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  # RBAC for tenant namespaces
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tenant-operator
+subjects:
+  - kind: ServiceAccount
+    name: tenant-operator
+    namespace: tenant-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tenant-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-operator
+  namespace: tenant-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tenant-operator
+  template:
+    metadata:
+      labels:
+        app: tenant-operator
+    spec:
+      serviceAccountName: tenant-operator
+      containers:
+        - name: tenant-operator
+          image: tenant-operator:latest
+          env:
+            - name: RUST_LOG
+              value: tenant_operator=info
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
