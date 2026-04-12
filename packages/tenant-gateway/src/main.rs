@@ -35,13 +35,26 @@ async fn main() -> anyhow::Result<()> {
     };
     let state = Arc::new(AppState { client });
 
+    let allowed_origins = std::env::var("ALLOWED_ORIGINS")
+        .unwrap_or_else(|_| "".into())
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse().expect("Invalid origin"))
+        .collect::<Vec<_>>();
+
+    let cors = if allowed_origins.is_empty() {
+        CorsLayer::new()
+    } else {
+        CorsLayer::new().allow_origin(allowed_origins)
+    };
+
     let app = Router::new()
         .route("/", get(ui::index))
         .route("/tenants", get(routes::list_tenants))
         .route("/tenants", post(routes::create_tenant))
         .route("/tenants/{name}", delete(routes::delete_tenant))
         .layer(middleware::from_fn(auth::basic_auth))
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

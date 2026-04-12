@@ -11,4 +11,5 @@ RUN cargo build --release -p tenant-gateway
 
 FROM gcr.io/distroless/cc-debian12
 COPY --from=builder /build/target/release/tenant-gateway /usr/local/bin/tenant-gateway
+USER 65532:65532
 ENTRYPOINT ["tenant-gateway"]

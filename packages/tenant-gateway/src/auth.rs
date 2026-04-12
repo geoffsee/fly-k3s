@@ -6,8 +6,8 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
 pub async fn basic_auth(req: Request, next: Next) -> Response {
-    let expected_user = std::env::var("ADMIN_USER").unwrap_or_else(|_| "admin".into());
-    let expected_pass = std::env::var("ADMIN_PASS").unwrap_or_else(|_| "admin".into());
+    let expected_user = std::env::var("ADMIN_USER").expect("ADMIN_USER must be set");
+    let expected_pass = std::env::var("ADMIN_PASS").expect("ADMIN_PASS must be set");
 
     let unauthorized = (
         StatusCode::UNAUTHORIZED,

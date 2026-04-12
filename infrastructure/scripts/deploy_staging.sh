@@ -56,8 +56,11 @@ for i in $(seq 1 60); do
   if [ "$i" = "60" ]; then echo "Kubernetes API not ready"; exit 1; fi
 done
 
+echo "Updating known hosts for $VM_IP..."
+ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts 2>/dev/null
+
 KUBECONFIG_FILE="$(pwd)/.kubeconfig.$VM_IP"
-ssh -o StrictHostKeyChecking=no core@$VM_IP 'sudo cat /var/lib/k0s/pki/admin.conf' > "$KUBECONFIG_FILE"
+ssh core@$VM_IP 'sudo cat /var/lib/k0s/pki/admin.conf' > "$KUBECONFIG_FILE"
 
 TMPFILE="$KUBECONFIG_FILE.tmp"
 sed -E "s#server: https?://[^[:space:]]*#server: https://$VM_IP:6443#" "$KUBECONFIG_FILE" > "$TMPFILE" && mv "$TMPFILE" "$KUBECONFIG_FILE"

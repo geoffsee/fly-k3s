@@ -11,4 +11,5 @@ RUN cargo build --release -p tenant-operator
 
 FROM gcr.io/distroless/cc-debian12
 COPY --from=builder /build/target/release/tenant-operator /usr/local/bin/tenant-operator
+USER 65532:65532
 ENTRYPOINT ["tenant-operator"]

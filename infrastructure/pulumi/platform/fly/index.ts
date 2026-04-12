@@ -64,14 +64,15 @@ const repoRoot = path.resolve(__dirname, "../../../..");
 
 const operatorDir = path.resolve(__dirname, "../../../../packages/tenant-operator");
 const operatorDirHash = hashDir(operatorDir);
-const operatorImage = "docker.io/library/tenant-operator:latest";
+const registryUrl = config.get("registryUrl") || `registry.${appName}.internal:5000`;
+const operatorImage = `${registryUrl}/tenant-operator:latest`;
 
-// Build operator image, load into k0s via docker save + fly ssh, then kubectl apply
+// Build and push the operator image to the internal registry, then kubectl apply
 const deployOperator = new command.local.Command("deploy-operator", {
     create: `bash -c '
 set -e
 # Build the operator image targeting amd64 (Fly machines)
-docker buildx build --platform linux/amd64 --load -t ${operatorImage} -f "${operatorDir}/Dockerfile" "${repoRoot}"
+docker buildx build --platform linux/amd64 --push -t ${operatorImage} -f "${operatorDir}/Dockerfile" "${repoRoot}"
 
 # Ensure k0s machine is running and ready
 fly machine list -a "${appName}" --json | jq -r ".[0].id" | xargs -I{} fly machine start {} -a "${appName}" 2>/dev/null || true
@@ -81,31 +82,29 @@ for i in $(seq 1 60); do
   sleep 5
 done
 
-# Wait for containerd to be ready
-echo "Waiting for containerd..."
-for i in $(seq 1 30); do
-  fly ssh console -a "${appName}" -C "k0s ctr --address /run/k0s/containerd.sock -n k8s.io images ls -q" >/dev/null 2>&1 && break
-  sleep 5
-done
-
-# Import image into k0s containerd via fly ssh
-docker save ${operatorImage} | gzip | fly ssh console -a "${appName}" -C "sh -c '"'"'gunzip | k0s ctr --address /run/k0s/containerd.sock -n k8s.io images import -'"'"'"
-
 # Apply operator manifest via fly proxy to k8s API
 fly proxy 6443:6443 -a "${appName}" -b 127.0.0.1 &
 K8S_PID=$!
 sleep 3
+
+# Fetch Kubeconfig securely (temporary file with 600)
+KUBECONFIG_TMP=$(mktemp)
+chmod 600 "$KUBECONFIG_TMP"
 fly ssh console -a "${appName}" -C "cat /var/lib/k0s/pki/admin.conf" 2>/dev/null \\
-  | sed "s|server: https://.*:6443|server: https://127.0.0.1:6443|" > /tmp/k0s-pulumi-kubeconfig
-KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl apply -f "${operatorDir}/deploy/manifest.yaml"
+  | sed "s|server: https://.*:6443|server: https://127.0.0.1:6443|" > "$KUBECONFIG_TMP"
+
+# Replace image in manifest before apply
+sed "s|image: .*|image: ${operatorImage}|" "${operatorDir}/deploy/manifest.yaml" > "${operatorDir}/deploy/manifest.rendered.yaml"
+
+KUBECONFIG="$KUBECONFIG_TMP" kubectl apply -f "${operatorDir}/deploy/manifest.rendered.yaml"
 for attempt in 1 2 3; do
-  KUBECONFIG=/tmp/k0s-pulumi-kubeconfig kubectl rollout status deployment/tenant-operator -n tenant-operator --timeout=120s && break
+  KUBECONFIG="$KUBECONFIG_TMP" kubectl rollout status deployment/tenant-operator -n tenant-operator --timeout=120s && break
   echo "Rollout attempt $attempt failed, retrying..."
   sleep 10
 done
 kill $K8S_PID 2>/dev/null || true
 wait $K8S_PID 2>/dev/null || true
-rm -f /tmp/k0s-pulumi-kubeconfig
+rm -f "$KUBECONFIG_TMP" "${operatorDir}/deploy/manifest.rendered.yaml"
 '`,
     triggers: [operatorDirHash],
 }, {dependsOn: [deploy]});
@@ -115,8 +114,8 @@ rm -f /tmp/k0s-pulumi-kubeconfig
 const gatewayAppName = config.get("gatewayAppName") || "tenant-gateway";
 const gatewayDir = path.resolve(__dirname, "../../../../packages/tenant-gateway");
 
-const adminUser = config.get("gatewayAdminUser") || "admin";
-const adminPass = config.getSecret("gatewayAdminPass") || pulumi.output(
+const adminUser = config.require("gatewayAdminUser");
+const adminPass = config.getSecret("gatewayAdminPass") || pulumi.secret(
     crypto.randomBytes(32).toString("base64url")
 );
 
@@ -134,8 +133,10 @@ const fetchKubeconfig = new command.local.Command("fetch-kubeconfig", {
     ].join(" && "),
 }, {dependsOn: [deploy]});
 
+const kubeconfigData = pulumi.secret(fetchKubeconfig.stdout);
+
 const setGatewaySecrets = new command.local.Command("set-gateway-secrets", {
-    create: pulumi.interpolate`fly secrets set "ADMIN_USER=${adminUser}" "ADMIN_PASS=${adminPass}" "KUBECONFIG_DATA=${fetchKubeconfig.stdout}" --app "${gatewayAppName}" --stage`,
+    create: pulumi.interpolate`fly secrets set "ADMIN_USER=${adminUser}" "ADMIN_PASS=${adminPass}" "KUBECONFIG_DATA=${kubeconfigData}" --app "${gatewayAppName}" --stage`,
 }, {dependsOn: [createGatewayApp, fetchKubeconfig]});
 
 const updateGatewayFlyToml = new command.local.Command("update-gateway-fly-toml", {

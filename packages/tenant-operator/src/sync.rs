@@ -5,9 +5,10 @@ use k8s_openapi::api::core::v1::{
     LimitRange, LimitRangeItem, LimitRangeSpec, Namespace, ResourceQuota, ResourceQuotaSpec,
 };
 use k8s_openapi::api::networking::v1::{
-    NetworkPolicy, NetworkPolicyIngressRule, NetworkPolicyPeer, NetworkPolicySpec,
+    NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule, NetworkPolicyPeer,
+    NetworkPolicyPort, NetworkPolicySpec,
 };
-use k8s_openapi::api::rbac::v1::{RoleBinding, RoleRef, Subject};
+use k8s_openapi::api::rbac::v1::{PolicyRule, Role, RoleBinding, RoleRef, Subject};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
 use kube::api::{Api, ObjectMeta, Patch, PatchParams};
@@ -131,7 +132,7 @@ async fn ensure_network_policy(client: &Client, ns: &str) -> Result<(), Error> {
     let api: Api<NetworkPolicy> = Api::namespaced(client.clone(), ns);
     let policy = NetworkPolicy {
         metadata: ObjectMeta {
-            name: Some("deny-cross-namespace".to_string()),
+            name: Some("tenant-isolation".to_string()),
             namespace: Some(ns.to_string()),
             ..Default::default()
         },
@@ -150,20 +151,99 @@ async fn ensure_network_policy(client: &Client, ns: &str) -> Result<(), Error> {
                 }]),
                 ..Default::default()
             }]),
-            policy_types: Some(vec!["Ingress".to_string()]),
+            egress: Some(vec![
+                // Allow DNS
+                NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        namespace_selector: Some(LabelSelector {
+                            match_labels: Some(BTreeMap::from([(
+                                "kubernetes.io/metadata.name".to_string(),
+                                "kube-system".to_string(),
+                            )])),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(
+                            53,
+                        )),
+                        protocol: Some("UDP".to_string()),
+                        ..Default::default()
+                    }]),
+                },
+                // Allow egress within namespace
+                NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        pod_selector: Some(LabelSelector::default()),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                },
+            ]),
+            policy_types: Some(vec!["Ingress".to_string(), "Egress".to_string()]),
             ..Default::default()
         }),
     };
-    api.patch(
-        "deny-cross-namespace",
-        &patch_params(),
-        &Patch::Apply(policy),
-    )
-    .await?;
+    api.patch("tenant-isolation", &patch_params(), &Patch::Apply(policy))
+        .await?;
     Ok(())
 }
 
 async fn ensure_rbac(client: &Client, ns: &str) -> Result<(), Error> {
+    let role_api: Api<Role> = Api::namespaced(client.clone(), ns);
+    let role = Role {
+        metadata: ObjectMeta {
+            name: Some("tenant-manager".to_string()),
+            namespace: Some(ns.to_string()),
+            ..Default::default()
+        },
+        rules: Some(vec![
+            PolicyRule {
+                api_groups: Some(vec!["".to_string()]),
+                resources: Some(vec![
+                    "pods".to_string(),
+                    "services".to_string(),
+                    "configmaps".to_string(),
+                    "secrets".to_string(),
+                ]),
+                verbs: vec![
+                    "get".to_string(),
+                    "list".to_string(),
+                    "watch".to_string(),
+                    "create".to_string(),
+                    "update".to_string(),
+                    "patch".to_string(),
+                    "delete".to_string(),
+                ],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["apps".to_string()]),
+                resources: Some(vec!["deployments".to_string(), "statefulsets".to_string()]),
+                verbs: vec![
+                    "get".to_string(),
+                    "list".to_string(),
+                    "watch".to_string(),
+                    "create".to_string(),
+                    "update".to_string(),
+                    "patch".to_string(),
+                    "delete".to_string(),
+                ],
+                ..Default::default()
+            },
+            PolicyRule {
+                api_groups: Some(vec!["networking.k8s.io".to_string()]),
+                resources: Some(vec!["ingresses".to_string(), "networkpolicies".to_string()]),
+                verbs: vec!["get".to_string(), "list".to_string(), "watch".to_string()],
+                ..Default::default()
+            },
+        ]),
+    };
+    role_api
+        .patch("tenant-manager", &patch_params(), &Patch::Apply(role))
+        .await?;
+
     let sa_api: Api<k8s_openapi::api::core::v1::ServiceAccount> =
         Api::namespaced(client.clone(), ns);
     let sa = k8s_openapi::api::core::v1::ServiceAccount {
@@ -187,8 +267,8 @@ async fn ensure_rbac(client: &Client, ns: &str) -> Result<(), Error> {
         },
         role_ref: RoleRef {
             api_group: "rbac.authorization.k8s.io".to_string(),
-            kind: "ClusterRole".to_string(),
-            name: "admin".to_string(),
+            kind: "Role".to_string(),
+            name: "tenant-manager".to_string(),
         },
         subjects: Some(vec![Subject {
             kind: "ServiceAccount".to_string(),

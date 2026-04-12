@@ -54,6 +54,8 @@ echo "[server] Waiting for k0s API server..."
 for i in $(seq 1 120); do
   if k0s kubectl --data-dir /var/lib/k0s get nodes >/dev/null 2>&1; then
     echo "[server] k0s API server is ready"
+    # Set restricted permissions on the admin config
+    [ -f /var/lib/k0s/pki/admin.conf ] && chmod 600 /var/lib/k0s/pki/admin.conf
     break
   fi
   if [ "$i" -eq 120 ]; then

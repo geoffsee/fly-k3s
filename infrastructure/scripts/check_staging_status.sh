@@ -30,7 +30,8 @@ for i in $(seq 1 30); do
     if [ "$i" = "30" ]; then echo "SSH not available"; exit 1; fi
 done
 
-ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no core@$VM_IP '
+ssh-keyscan -H $VM_IP >> ~/.ssh/known_hosts 2>/dev/null
+ssh -o ConnectTimeout=10 core@$VM_IP '
     uptime
     echo "---"
     sudo systemctl is-active k0s 2>/dev/null || echo "k0s not active"

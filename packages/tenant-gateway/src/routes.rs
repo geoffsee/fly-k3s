@@ -58,6 +58,18 @@ pub async fn create_tenant(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateTenantRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // Validate tenant name
+    let name_re = regex::Regex::new(r"^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$").unwrap();
+    if !name_re.is_match(&req.name) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid tenant name".to_string()));
+    }
+
+    // Basic quantity validation
+    let qty_re = regex::Regex::new(r"^[0-9]+(\.[0-9]+)?[mkiMGTPEYZ]?$").unwrap();
+    if !qty_re.is_match(&req.cpu) || !qty_re.is_match(&req.memory) {
+        return Err((StatusCode::BAD_REQUEST, "Invalid resource quantity".to_string()));
+    }
+
     let api: Api<Tenant> = Api::all(state.client.clone());
 
     let tenant = Tenant::new(

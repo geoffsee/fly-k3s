@@ -16,7 +16,7 @@ k3s server \
   --flannel-backend host-gw \
   --disable traefik \
   --write-kubeconfig /var/lib/rancher/k3s/k3s.yaml \
-  --write-kubeconfig-mode 644 &
+  --write-kubeconfig-mode 600 &
 
 K3S_PID=$!
 

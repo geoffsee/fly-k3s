@@ -2256,6 +2256,7 @@ dependencies = [
  "base64 0.22.1",
  "k8s-openapi",
  "kube",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

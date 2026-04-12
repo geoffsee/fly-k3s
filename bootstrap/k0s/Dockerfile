@@ -21,4 +21,10 @@ RUN chmod +x /usr/local/bin/entrypoint-server.sh \
     /usr/local/bin/entrypoint-worker.sh \
     /usr/local/bin/autoscaler.py
 
+# Add non-root user
+RUN adduser -D -u 1001 k8s \
+    && mkdir -p /var/lib/k0s \
+    && chown k8s:k8s /var/lib/k0s
+
+USER 1001
 ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/entrypoint-${K0S_ROLE}.sh"]

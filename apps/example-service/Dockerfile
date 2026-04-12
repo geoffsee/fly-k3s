@@ -1,2 +1,2 @@
-FROM nginx:latest
-EXPOSE 80
+FROM nginxinc/nginx-unprivileged:stable-alpine
+EXPOSE 8080

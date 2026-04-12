@@ -11,4 +11,5 @@ if [ -z "$VM_IP" ]; then
     exit 1
 fi
 
-ssh -i vm-ssh.pk -o StrictHostKeyChecking=no core@"$VM_IP" "$@"
+ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts 2>/dev/null
+ssh -i vm-ssh.pk core@"$VM_IP" "$@"
