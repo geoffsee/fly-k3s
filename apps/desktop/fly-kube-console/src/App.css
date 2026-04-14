@@ -1,0 +1,7 @@
+/* App.css is mostly handled by Tailwind in index.css */
+/* Add any app-specific overrides here */
+
+#root {
+  width: 100%;
+  height: 100%;
+}
