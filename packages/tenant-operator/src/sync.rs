@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetSpec};
 use k8s_openapi::api::core::v1::{
-    LimitRange, LimitRangeItem, LimitRangeSpec, Namespace, ResourceQuota, ResourceQuotaSpec,
+    Container, ContainerPort, EnvVar, LimitRange, LimitRangeItem, LimitRangeSpec, Namespace,
+    PodSpec, PodTemplateSpec, ResourceQuota, ResourceQuotaSpec, Secret, Service, ServiceAccount,
+    ServicePort, ServiceSpec,
 };
 use k8s_openapi::api::networking::v1::{
     NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule, NetworkPolicyPeer,
@@ -35,7 +38,9 @@ pub async fn sync_tenant(tenant: Arc<Tenant>, ctx: Arc<Context>) -> Result<Actio
     ensure_limit_range(client, &ns, &tenant.spec).await?;
     ensure_network_policy(client, &ns).await?;
     ensure_rbac(client, &ns).await?;
-    update_status(client, &name, "Ready", "All resources synced").await?;
+
+    let kubeconfig = ensure_vcluster(client, &ns, &name).await?;
+    update_status(client, &name, "Ready", "All resources synced", kubeconfig).await?;
 
     info!(tenant = %name, "sync complete");
     Ok(Action::requeue(std::time::Duration::from_secs(300)))
@@ -292,6 +297,7 @@ async fn update_status(
     tenant_name: &str,
     phase: &str,
     message: &str,
+    kubeconfig: Option<String>,
 ) -> Result<(), Error> {
     let api: Api<Tenant> = Api::all(client.clone());
     let status = serde_json::json!({
@@ -301,6 +307,7 @@ async fn update_status(
         "status": TenantStatus {
             phase: Some(phase.to_string()),
             message: Some(message.to_string()),
+            kubeconfig,
         }
     });
     api.patch_status(
@@ -310,6 +317,175 @@ async fn update_status(
     )
     .await?;
     Ok(())
+}
+
+async fn ensure_vcluster(
+    client: &Client,
+    ns: &str,
+    tenant_name: &str,
+) -> Result<Option<String>, Error> {
+    let sa_api: Api<ServiceAccount> = Api::namespaced(client.clone(), ns);
+    let sa = ServiceAccount {
+        metadata: ObjectMeta {
+            name: Some("vcluster".to_string()),
+            namespace: Some(ns.to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    sa_api
+        .patch("vcluster", &patch_params(), &Patch::Apply(sa))
+        .await?;
+
+    let role_api: Api<Role> = Api::namespaced(client.clone(), ns);
+    let role = Role {
+        metadata: ObjectMeta {
+            name: Some("vcluster-role".to_string()),
+            namespace: Some(ns.to_string()),
+            ..Default::default()
+        },
+        rules: Some(vec![PolicyRule {
+            api_groups: Some(vec!["".to_string(), "apps".to_string(), "networking.k8s.io".to_string()]),
+            resources: Some(vec!["*".to_string()]),
+            verbs: vec!["*".to_string()],
+            ..Default::default()
+        }]),
+    };
+    role_api
+        .patch("vcluster-role", &patch_params(), &Patch::Apply(role))
+        .await?;
+
+    let rb_api: Api<RoleBinding> = Api::namespaced(client.clone(), ns);
+    let rb = RoleBinding {
+        metadata: ObjectMeta {
+            name: Some("vcluster-binding".to_string()),
+            namespace: Some(ns.to_string()),
+            ..Default::default()
+        },
+        role_ref: RoleRef {
+            api_group: "rbac.authorization.k8s.io".to_string(),
+            kind: "Role".to_string(),
+            name: "vcluster-role".to_string(),
+        },
+        subjects: Some(vec![Subject {
+            kind: "ServiceAccount".to_string(),
+            name: "vcluster".to_string(),
+            namespace: Some(ns.to_string()),
+            ..Default::default()
+        }]),
+    };
+    rb_api
+        .patch("vcluster-binding", &patch_params(), &Patch::Apply(rb))
+        .await?;
+
+    let svc_api: Api<Service> = Api::namespaced(client.clone(), ns);
+    let svc = Service {
+        metadata: ObjectMeta {
+            name: Some("vcluster".to_string()),
+            namespace: Some(ns.to_string()),
+            ..Default::default()
+        },
+        spec: Some(ServiceSpec {
+            ports: Some(vec![ServicePort {
+                name: Some("https".to_string()),
+                port: 443,
+                target_port: Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(
+                    8443,
+                )),
+                ..Default::default()
+            }]),
+            selector: Some(BTreeMap::from([("app".to_string(), "vcluster".to_string())])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    svc_api
+        .patch("vcluster", &patch_params(), &Patch::Apply(svc))
+        .await?;
+
+    let sts_api: Api<StatefulSet> = Api::namespaced(client.clone(), ns);
+    let sts = StatefulSet {
+        metadata: ObjectMeta {
+            name: Some("vcluster".to_string()),
+            namespace: Some(ns.to_string()),
+            ..Default::default()
+        },
+        spec: Some(StatefulSetSpec {
+            service_name: "vcluster".to_string(),
+            replicas: Some(1),
+            selector: LabelSelector {
+                match_labels: Some(BTreeMap::from([("app".to_string(), "vcluster".to_string())])),
+                ..Default::default()
+            },
+            template: PodTemplateSpec {
+                metadata: Some(ObjectMeta {
+                    labels: Some(BTreeMap::from([("app".to_string(), "vcluster".to_string())])),
+                    ..Default::default()
+                }),
+                spec: Some(PodSpec {
+                    service_account_name: Some("vcluster".to_string()),
+                    containers: vec![Container {
+                        name: "vcluster".to_string(),
+                        image: Some("loftsh/vcluster:0.15.0".to_string()),
+                        args: Some(vec![
+                            "--name=vcluster".to_string(),
+                            format!("--tls-san=vcluster.{}", ns),
+                        ]),
+                        env: Some(vec![EnvVar {
+                            name: "VCLUSTER_TELEMETRY_DISABLED".to_string(),
+                            value: Some("true".to_string()),
+                            ..Default::default()
+                        }]),
+                        ports: Some(vec![ContainerPort {
+                            container_port: 8443,
+                            name: Some("https".to_string()),
+                            ..Default::default()
+                        }]),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+            },
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    sts_api
+        .patch("vcluster", &patch_params(), &Patch::Apply(sts))
+        .await?;
+
+    // Try to get the kubeconfig from the secret vcluster generates
+    let secret_api: Api<Secret> = Api::namespaced(client.clone(), ns);
+    match secret_api.get("vc-vcluster").await {
+        Ok(secret) => {
+            if let Some(data) = secret.data {
+                if let Some(config) = data.get("config") {
+                    let kubeconfig = String::from_utf8(config.0.clone()).ok();
+                    if let Some(cfg) = kubeconfig {
+                        // Create a secret in the tenant namespace with the requested name
+                        let target_secret_name = format!("{}-kubeconfig.yml", tenant_name);
+                        let mut secret_data = BTreeMap::new();
+                        secret_data.insert("value".to_string(), k8s_openapi::ByteString(cfg.as_bytes().to_vec()));
+                        
+                        let target_secret = Secret {
+                            metadata: ObjectMeta {
+                                name: Some(target_secret_name.clone()),
+                                namespace: Some(ns.to_string()),
+                                ..Default::default()
+                            },
+                            data: Some(secret_data),
+                            ..Default::default()
+                        };
+                        secret_api.patch(&target_secret_name, &patch_params(), &Patch::Apply(target_secret)).await?;
+                        
+                        return Ok(Some(cfg));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        Err(_) => Ok(None),
+    }
 }
 
 fn patch_params() -> PatchParams {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use kube::api::{Api, DeleteParams, PostParams};
@@ -28,6 +28,7 @@ pub struct TenantResponse {
     pub memory: String,
     pub phase: Option<String>,
     pub message: Option<String>,
+    pub kubeconfig: Option<String>,
 }
 
 pub async fn list_tenants(
@@ -47,6 +48,7 @@ pub async fn list_tenants(
                 memory: t.spec.memory.clone(),
                 phase: status.and_then(|s| s.phase.clone()),
                 message: status.and_then(|s| s.message.clone()),
+                kubeconfig: status.and_then(|s| s.kubeconfig.clone()),
             }
         })
         .collect();
@@ -101,6 +103,28 @@ pub async fn delete_tenant(
 
     info!(tenant = %name, "tenant deleted");
     Ok((StatusCode::OK, Json(serde_json::json!({"status": "deleted", "name": name}))))
+}
+
+pub async fn get_tenant_kubeconfig(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let api: Api<Tenant> = Api::all(state.client.clone());
+    let tenant = api.get(&name).await.map_err(k8s_err)?;
+    
+    let kubeconfig = tenant.status.and_then(|s| s.kubeconfig)
+        .ok_or((StatusCode::NOT_FOUND, "Kubeconfig not ready yet".to_string()))?;
+
+    let filename = format!("{}-kubeconfig.yml", name);
+    
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, "application/x-yaml".parse().unwrap());
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        format!("attachment; filename=\"{}\"", filename).parse().unwrap(),
+    );
+    
+    Ok((StatusCode::OK, headers, kubeconfig))
 }
 
 fn k8s_err(e: kube::Error) -> (StatusCode, String) {

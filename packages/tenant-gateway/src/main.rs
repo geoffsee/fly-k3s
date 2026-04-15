@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/tenants", get(routes::list_tenants))
         .route("/tenants", post(routes::create_tenant))
         .route("/tenants/{name}", delete(routes::delete_tenant))
+        .route("/tenants/{name}/kubeconfig", get(routes::get_tenant_kubeconfig))
         .layer(middleware::from_fn(auth::basic_auth))
         .layer(cors)
         .layer(TraceLayer::new_for_http())

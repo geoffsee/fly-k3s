@@ -26,4 +26,5 @@ pub struct TenantSpec {
 pub struct TenantStatus {
     pub phase: Option<String>,
     pub message: Option<String>,
+    pub kubeconfig: Option<String>,
 }

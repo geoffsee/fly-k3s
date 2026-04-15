@@ -72,6 +72,17 @@ pub async fn index() -> Html<&'static str> {
             font-size: 0.75rem;
         }
         .delete-btn:hover { background: #b91c1c; }
+        .download-btn {
+            background: #0ea5e9;
+            color: white;
+            text-decoration: none;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+        .download-btn:hover { background: #0284c7; }
         .empty { text-align: center; padding: 2rem; color: #64748b; }
     </style>
 </head>
@@ -131,7 +142,10 @@ pub async fn index() -> Html<&'static str> {
                         <td>${esc(t.cpu)}</td>
                         <td>${esc(t.memory)}</td>
                         <td><span class="phase phase-${(t.phase || 'pending').toLowerCase()}">${esc(t.phase || 'Pending')}</span></td>
-                        <td><button class="delete-btn" onclick="deleteTenant('${esc(t.name)}')">Delete</button></td>
+                        <td>
+                            ${t.kubeconfig ? `<a href="/tenants/${esc(t.name)}/kubeconfig" class="download-btn" download="${esc(t.name)}-kubeconfig.yml">Kubeconfig</a>` : ''}
+                            <button class="delete-btn" onclick="deleteTenant('${esc(t.name)}')">Delete</button>
+                        </td>
                     </tr>
                 `).join('');
             } catch (e) {
